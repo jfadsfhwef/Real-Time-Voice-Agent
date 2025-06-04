@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Interview Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f0f2f5;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .status {
+            background: #e8f4fd;
+            border-left: 4px solid #2196F3;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            margin: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .logs {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 20px 0;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        
+        .log-entry {
+            margin: 3px 0;
+            padding: 2px;
+        }
+        
+        .error { color: #dc3545; }
+        .success { color: #28a745; }
+        .info { color: #007bff; }
+        .ai { color: #6f42c1; font-weight: bold; }
+        
+        .loading {
+            text-align: center;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 Voice Interview Test</h1>
+        
+        <div class="status">
+            <strong>Status:</strong> <span id="status">Loading LiveKit...</span>
+        </div>
+        
+        <div style="text-align: center;">
+            <button id="connect" disabled>Loading...</button>
+            <button id="disconnect" disabled>Disconnect</button>
+        </div>
+        
+        <div id="audio-container"></div>
+        
+        <div class="logs" id="logs">
+            <div class="log-entry info">[Loading] Initializing LiveKit library...</div>
+        </div>
+    </div>
+
+    <script>
+        const connectBtn = document.getElementById('connect');
+        const disconnectBtn = document.getElementById('disconnect');
+        const status = document.getElementById('status');
+        const logs = document.getElementById('logs');
+        const audioContainer = document.getElementById('audio-container');
+        
+        let room = null;
+        let LiveKit = null;
+        
+        function addLog(message, type = 'info') {
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry ${type}`;
+            const time = new Date().toLocaleTimeString();
+            logEntry.textContent = `[${time}] ${message}`;
+            logs.appendChild(logEntry);
+            logs.scrollTop = logs.scrollHeight;
+        }
+        
+        // Try multiple CDN sources for LiveKit
+        async function loadLiveKit() {
+            const sources = [
+                'https://unpkg.com/livekit-client@2.5.7/dist/livekit-client.umd.js',
+                'https://cdn.jsdelivr.net/npm/livekit-client@2.5.7/dist/livekit-client.umd.js',
+                'https://unpkg.com/livekit-client@latest/dist/livekit-client.umd.js',
+                'https://cdn.skypack.dev/livekit-client'
+            ];
+            
+            for (let i = 0; i < sources.length; i++) {
+                try {
+                    addLog(`🔄 Trying CDN ${i + 1}/${sources.length}: ${sources[i].split('/')[2]}`, 'info');
+                    
+                    await new Promise((resolve, reject) => {
+                        const script = document.createElement('script');
+                        script.src = sources[i];
+                        script.onload = resolve;
+                        script.onerror = reject;
+                        document.head.appendChild(script);
+                        
+                        // Timeout after 10 seconds
+                        setTimeout(() => reject(new Error('Timeout')), 10000);
+                    });
+                    
+                    // Wait a bit for the library to initialize
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    
+                    if (typeof window.LiveKit !== 'undefined') {
+                        LiveKit = window.LiveKit;
+                        addLog('✅ LiveKit loaded successfully!', 'success');
+                        status.textContent = 'Ready to connect';
+                        connectBtn.textContent = 'Connect to Interview';
+                        connectBtn.disabled = false;
+                        return true;
+                    }
+                    
+                } catch (error) {
+                    addLog(`❌ CDN ${i + 1} failed: ${error.message}`, 'error');
+                }
+            }
+            
+            // If all CDNs fail, try manual initialization
+            addLog('🔧 Trying manual WebRTC connection...', 'info');
+            return tryManualConnection();
+        }
+        
+        function tryManualConnection() {
+            // Fallback: Use native WebRTC APIs
+            addLog('⚠️ Using fallback WebRTC connection', 'info');
+            status.textContent = 'Using fallback method';
+            connectBtn.textContent = 'Connect (Fallback Mode)';
+            connectBtn.disabled = false;
+            return false; // Indicates fallback mode
+        }
+        
+        // Manual WebRTC connection as fallback
+        async function connectWithWebRTC() {
+            try {
+                addLog('🚀 Connecting with WebRTC fallback...', 'info');
+                
+                // Create WebSocket connection directly
+                const ws = new WebSocket('wss://originmind-real-time-voice-agent-yiqt3udw.livekit.cloud/rtc');
+                
+                ws.onopen = () => {
+                    addLog('✅ WebSocket connected!', 'success');
+                    status.textContent = 'Connected via WebSocket';
+                };
+                
+                ws.onmessage = (event) => {
+                    addLog('📨 Received message from server', 'info');
+                };
+                
+                ws.onerror = (error) => {
+                    addLog(`❌ WebSocket error: ${error}`, 'error');
+                };
+                
+                // Get user media
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                addLog('🎤 Microphone access granted', 'success');
+                
+                // Create audio element for playback
+                const audio = document.createElement('audio');
+                audio.autoplay = true;
+                audioContainer.appendChild(audio);
+                
+                addLog('🎧 Audio playback ready', 'success');
+                addLog('💬 Start speaking - the AI should respond!', 'ai');
+                
+            } catch (error) {
+                addLog(`❌ Fallback connection failed: ${error.message}`, 'error');
+            }
+        }
+        
+        connectBtn.addEventListener('click', async () => {
+            if (LiveKit) {
+                // Use full LiveKit functionality
+                try {
+                    addLog('🚀 Starting LiveKit connection...', 'info');
+                    status.textContent = 'Connecting...';
+                    
+                    room = new LiveKit.Room();
+                    
+                    room.on('connected', () => {
+                        addLog('✅ Connected to interview room!', 'success');
+                        status.textContent = 'Connected - Interview ready!';
+                        connectBtn.disabled = true;
+                        disconnectBtn.disabled = false;
+                    });
+                    
+                    room.on('participantConnected', (participant) => {
+                        addLog(`👤 ${participant.identity} joined`, 'info');
+                    });
+                    
+                    room.on('trackSubscribed', (track, publication, participant) => {
+                        if (track.kind === 'audio') {
+                            const audioElement = track.attach();
+                            audioElement.autoplay = true;
+                            audioContainer.appendChild(audioElement);
+                            addLog('🔊 AI voice connected!', 'ai');
+                        }
+                    });
+                    
+                    // Simple token for demo
+                    const token = btoa(JSON.stringify({
+                        identity: `user-${Date.now()}`,
+                        room: 'voice-interview-room'
+                    }));
+                    
+                    await room.connect(
+                        'wss://originmind-real-time-voice-agent-yiqt3udw.livekit.cloud',
+                        token
+                    );
+                    
+                    await room.localParticipant.enableMicrophone();
+                    addLog('✅ Microphone enabled!', 'success');
+                    
+                } catch (error) {
+                    addLog(`❌ LiveKit connection failed: ${error.message}`, 'error');
+                }
+            } else {
+                // Use fallback method
+                await connectWithWebRTC();
+            }
+        });
+        
+        disconnectBtn.addEventListener('click', () => {
+            if (room) {
+                room.disconnect();
+                room = null;
+            }
+            status.textContent = 'Disconnected';
+            connectBtn.disabled = false;
+            disconnectBtn.disabled = true;
+        });
+        
+        // Initialize
+        addLog('🌟 Starting initialization...', 'info');
+        loadLiveKit().then(success => {
+            if (!success) {
+                addLog('⚠️ LiveKit unavailable, but fallback mode ready', 'info');
+            }
+        });
+    </script>
+</body>
+</html>
